@@ -1,111 +1,133 @@
 #include <iostream>
 #include <vector>
-#include "objsdl/objsdl.h"
-#include "mylibraries/func.h"
+#include <SDL.h>
 
-using namespace std;
+constexpr int zoom = 6;
+constexpr int width = 250, height = 150;
 
 class Ant
 {
 private:
-	SDL::Point pos, direction;
+	constexpr static SDL_Point directions[] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+	int x, y, direction = 0;
+
 public:
-	Ant(SDL::Point pos):pos(pos), direction(1,0){}
+	Ant(int x, int y) : x(x), y(y) {}
 	void Move()
 	{
-		pos+=direction;
+		x += directions[direction].x;
+		y += directions[direction].y;
 	}
 	void Turn(bool left)
 	{
-		direction=~direction*(left^(direction.x==0)?-1:1);
+		direction = (left ? direction + 3 : direction + 1) % 4;
 	}
-	SDL::Point Position()const
+	int X() const
 	{
-		return pos;
+		return x;
+	}
+	int Y() const
+	{
+		return y;
+	}
+	void DrawOn(SDL_Renderer *rend)
+	{
+		SDL_SetRenderDrawColor(rend, 0, 255, 0, 255);
+		SDL_Rect rect{x * zoom, y * zoom, zoom, zoom};
+		SDL_RenderFillRect(rend, &rect);
 	}
 };
 
 class Field
 {
 private:
-	SDL::Surface surface;
-	static SDL::Color NegateColor(SDL::Color col)
-	{
-		return SDL::Color(255-col.r, 255-col.g, 255-col.b, 128);
-	}
+	bool field[height][width] = {{false}};
+
 public:
-	Field(SDL::Point size, const vector<SDL::Color>& colors):surface(size, colors, 8) {}
-	void DrawOn(SDL::Renderer& rend, SDL::Rect dst)
+	Field() {}
+	void DrawOn(SDL_Renderer *rend)
 	{
-		rend.Draw(surface, surface.Size(), dst);
+		for (int y = 0; y < height; ++y)
+		{
+			for (int x = 0; x < width; ++x)
+			{
+				bool on = field[y][x];
+				SDL_SetRenderDrawColor(rend, on ? 255 : 32, on ? 255 : 32, on ? 255 : 32, 255);
+
+				SDL_Rect rect{x * zoom, y * zoom, zoom, zoom};
+				SDL_RenderFillRect(rend, &rect);
+			}
+		}
 	}
-	void NegateColor(SDL::Point pos)
+	void Toggle(int x, int y)
 	{
-		surface.Draw(pos, NegateColor(surface[pos]));
+		field[y][x] = !field[y][x];
 	}
-	SDL::Rect Area()const
+	bool Contains(const Ant &ant)
 	{
-		return SDL::Rect(surface.Size());
+		return ant.X() >= 0 && ant.X() < width && ant.Y() >= 0 && ant.Y() <= height;
 	}
-	SDL::Color operator[](SDL::Point xy)
+	bool Get(int x, int y)
 	{
-		return surface[xy];
-	}
-	void Draw(SDL::Point xy, SDL::Color col)
-	{
-		surface.Draw(xy, col);
+		return field[y][x];
 	}
 };
 
-int main(int argc, const char* argv[])try
+void UpdateWindowTitle(SDL_Window *window, int step_count)
 {
-	SDL::Init _sdl;
-	SDL::Font font("font.ttf", 12);
-	SDL::Window window("Langton's ant", SDL::Rect(70,70, 900, 600));
-	SDL::Renderer rend(window);
-	SDL::KeyboardState kb;
-	uint32 step_count=0;
-	constexpr int zoom=2;
-	Field field(SDL::Point(800,600)/zoom, {SDL::Color(15,15,15), SDL::Color(240,240,240)});
-	Ant ant(SDL::Point(400, 300)/zoom);
-	bool repeat=true;
-	bool move=false;
-	while(repeat)
+	std::string title = "Langton's ant, steps: " + std::to_string(step_count);
+	SDL_SetWindowTitle(window, title.c_str());
+}
+
+int main()
+{
+	SDL_Init(SDL_INIT_EVERYTHING);
+
+	SDL_Window *window = SDL_CreateWindow("Langton's ant", 40, 40, width * zoom, height * zoom, 0);
+	SDL_Renderer *rend = SDL_CreateRenderer(window, -1, 0);
+	SDL_Event event;
+	int step_count = 0;
+	Field field;
+	Ant ant{width / 2, height / 2};
+	bool repeat = true;
+	bool move = false;
+	while (repeat)
 	{
-		rend.Repaint(SDL::Color());
-		field.DrawOn(rend, SDL::Point(800,600));
-		rend.Draw(SDL::Rect(ant.Position()*zoom, zoom), SDL::Color(0,255,0));
-		rend.Draw(SDL::Rect(800,0,100,600), SDL::Color(255,255,255));
-		rend.Draw(font, to_string(step_count), SDL::Color(0,0,0), SDL::Rect(800,0, 100,20));
-		rend.Show();
-		if(move)
+
+		SDL_SetRenderDrawColor(rend, 0, 0, 0, 255);
+		SDL_RenderClear(rend);
+
+		field.DrawOn(rend);
+		ant.DrawOn(rend);
+		SDL_RenderPresent(rend);
+
+		if (move)
 		{
 			++step_count;
-			ant.Turn(field[ant.Position()]==SDL::Color(240,240,240));
-			field.NegateColor(ant.Position());
+			UpdateWindowTitle(window, step_count);
+
+			ant.Turn(field.Get(ant.X(), ant.Y()));
+			field.Toggle(ant.X(), ant.Y());
 			ant.Move();
-			if(!field.Area().Encloses(ant.Position()))
+			if (!field.Contains(ant))
 			{
-				SDL::MessageBox::Show("Langton's ant", "The ant has escaped!");
+				SDL_ShowSimpleMessageBox(0, "Langton's ant", "The ant has escaped!", window);
 				break;
 			}
 		}
-		for(auto& event:SDL::events::Handler())
+		while (SDL_PollEvent(&event))
 		{
-			if(event.Type()==SDL::events::Type::Quit)
+			if (event.type == SDL_QUIT)
 			{
-				repeat=false;
+				repeat = false;
 			}
-			else if(event.Type()==SDL::events::Type::MouseButtonDown)
+			else if (event.type == SDL_MOUSEBUTTONDOWN)
 			{
-				move=!move;
+				move = !move;
 			}
 		}
-		SDL::Wait(20);
+		SDL_Delay(10);
 	}
+	SDL_Quit();
 	return 0;
-}
-catch(exception& exc)
-{
-	SDL::MessageBox::Show("Error", "Error: '"s+exc.what()+"'");
 }
