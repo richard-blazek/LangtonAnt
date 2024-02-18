@@ -1,2 +1,2 @@
-ant: main.cpp
-	g++ -o ant main.cpp -I/usr/include/SDL2 -D_REENTRANT -lSDL2
+ant: main.c
+	gcc -o ant main.c -I/usr/include -D_REENTRANT -lSDL2
